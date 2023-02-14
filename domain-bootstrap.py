@@ -19,6 +19,15 @@ from schema import Optional, Schema, SchemaError
 # Change script to list all the domains and certs its going to create.  Let the user select
 # Need to check that the manifest.yml file is correctly configured.
 # When adding records from parent to subdomain, if ok, it then should remove them from parent domain (run a test before removing)
+# For each domain in manifest.yml:
+# Cert issued?  - No, do you want to create it?
+# Cert validated? - No, do you want to validate it?
+# Hosted zone exists? No, exit, user needs to rectify
+# Domain is either:
+#     - Mapped to some thing else - Yes, exit, user needs to rectify
+#     - Is available but unmapped - No, do you want to point DNS at ALB?
+#     - Is already mapped to the ALB - OK, everything is sweet
+
 
 MAX_DOMAIN_DEPTH = 2
 AWS_CERT_REGION = "eu-west-2"
