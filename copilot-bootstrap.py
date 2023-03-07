@@ -485,5 +485,45 @@ def generate_storage(storage_config_file, output, overwrite):
     click.echo(templates["storage-instructions"].render(services=services))
 
 
+@cli.command()
+@click.argument("service_name", type=str)
+@click.argument("env", type=str, default="prod")
+def get_service_secrets(service_name, env):
+    """
+    List secret names and values for a service
+    """
+    
+    if not Path("./copilot").exists() or not Path("./copilot").is_dir():
+        click.echo("Cannot find copilot directory. Run this command in the root of the deployment repository.")
+        
+    client = boto3.client('ssm')
+
+    path = SSM_BASE_PATH.format(app=service_name, env=env)
+
+    params = dict(
+        Path=path,
+        Recursive=False,
+        WithDecryption=True,
+        MaxResults=10
+    )
+    secrets = []
+    
+    # TODO: refactor shared code with get_ssm_secret_names
+    while True:
+        response = client.get_parameters_by_path(
+            **params
+        )
+
+        for secret in response["Parameters"]:
+            secrets.append("{:<8}: {:<15}".format(secret["Name"], secret["Value"]))
+
+        if "NextToken" in response:
+            params["NextToken"] = response["NextToken"]
+        else:
+            break
+    
+    print("\n".join(sorted(secrets)))
+   
+
 if __name__ == "__main__":
     cli()
