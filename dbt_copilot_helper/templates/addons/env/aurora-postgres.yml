@@ -31,7 +31,6 @@ Mappings:
     {{ environment_name }}:
       DBMinCapacity: {{ config.min_capacity }}
       DBMaxCapacity: {{ config.max_capacity }}
-      MultiAZ: {% if config.replicas %}true{% else %}false{% endif %}
 {% endfor %}
 
 Resources:
@@ -127,7 +126,6 @@ Resources:
       DBInstanceClass: db.serverless
       EnablePerformanceInsights: true
       Engine: 'aurora-postgresql'
-      MultiAZ: !FindInMap [{{ service.prefix }}EnvScalingConfigurationMap, !Ref Env, MultiAZ]
       PromotionTier: 1
       AvailabilityZone: !Select
         - 0
