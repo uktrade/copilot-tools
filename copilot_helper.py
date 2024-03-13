@@ -27,7 +27,10 @@ from dbt_copilot_helper.utils.click import ClickDocOptGroup
     message=f"dbt-copilot-tools %(version)s",
 )
 def copilot_helper():
-    pass
+    click.secho(
+        "DeprecationWarning: The package 'dbt-copilot-tools' has been deprecated. Please switch to using https://pypi.org/project/dbt-platform-helper/.",
+        fg="magenta",
+    )
 
 
 copilot_helper.add_command(bootstrap_commands)

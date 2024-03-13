@@ -40,10 +40,6 @@ def prepare():
     )
 
     if repository.endswith("-deploy") or Path("./copilot").exists():
-        click.secho(
-            "You are in the deploy repository; make sure you are in the application codebase repository.",
-            fg="red",
-        )
         exit(1)
 
     builder_configuration_url = "https://raw.githubusercontent.com/uktrade/ci-image-builder/main/image_builder/configuration/builder_configuration.yml"
