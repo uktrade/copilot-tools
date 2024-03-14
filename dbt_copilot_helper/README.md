@@ -1,5 +1,11 @@
 # DBT Copilot Tools
 
+## Deprecated
+
+This package has been deprecated. Please switch to using [dbt-platform-helper](https://pypi.org/project/dbt-platform-helper/).
+
+## Introduction
+
 This package contains a set of tools in the form of a Command Line Interface (CLI) primarily for transferring applications/services from [GOV.UK PaaS](https://www.cloud.service.gov.uk) to Department for Business and Trade (DBT) PaaS which augments [AWS Copilot](https://aws.github.io/copilot-cli/). These tools can also be used to provision AWS resources and/or make sure the CloudFormation templates conform to best practices.
 
 ## Getting started
