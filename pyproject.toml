@@ -38,6 +38,8 @@ prettytable = "^3.9.0"
 semver = "^3.0.2"
 tomlkit = "^0.12.2"
 checkov = "^3.1.67"
+psycopg2 = "^2.9.9"
+responses = "^0.25.0"
 
 [tool.poetry.group.dev.dependencies]
 moto = {extras = ["all"], version = "^4.1.12"}

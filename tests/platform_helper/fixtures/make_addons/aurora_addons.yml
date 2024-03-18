@@ -14,3 +14,6 @@ my-aurora-db:
     development:
       snapshot_id: my-recent-snapshot
       deletion_protection: true
+  
+  services:
+    - web

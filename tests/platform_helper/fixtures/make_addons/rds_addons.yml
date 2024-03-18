@@ -8,8 +8,10 @@ my-rds-db:
     default:
       plan: small
       snapshot_id: test-snapshot-id
-
     production:
       plan: large-ha
       snapshot_id: ""
       iops: 1000
+  services:
+    - web
+      

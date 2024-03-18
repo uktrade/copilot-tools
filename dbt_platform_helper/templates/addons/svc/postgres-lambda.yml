@@ -1,0 +1,184 @@
+# {% version_info %}
+Parameters:
+  # Copilot required Parameters...
+  App:
+    Type: String
+    Description: Your application's name.
+  Env:
+    Type: String
+    Description: The environment name your service, job, or workflow is being deployed to.
+  Name:
+    Type: String
+    Description: The name of the service, job, or workflow being deployed.
+
+Mappings:
+  {{ addon_config.prefix }}EnvironmentConfigMap:
+{%- for env_name, config in addon_config.environments.items() %}
+    {{ env_name }}:
+      DeletionPolicy: {{ config.deletion_policy }}
+      SnapshotIdentifier: {{ config.snapshot_id if config.snapshot_id else '""' }}
+{%- endfor %}
+
+Conditions:
+  {{ addon_config.prefix }}UseSnapshot: !Not [!Equals [!FindInMap [{{ addon_config.prefix }}EnvironmentConfigMap, !Ref Env, SnapshotIdentifier], ""]]
+
+Resources:
+  {{ addon_config.prefix }}LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${App}-${Env}-${Name}-{{ addon_config.prefix}}-{{ addon_config.type }}-create-user"
+      Handler: index.handler
+      Runtime: python3.11
+      Layers:
+        - arn:aws:lambda:eu-west-2:763451185160:layer:python-postgres:1
+      MemorySize: 128
+      Timeout: 10
+      Role: !GetAtt {{ addon_config.prefix }}LambdaFunctionExecutionRole.Arn
+      VpcConfig:
+        SecurityGroupIds:
+          - !ImportValue
+            'Fn::Sub': "${App}-${Env}-{{ addon_config.prefix }}-DBClusterSecurityGroupName"
+        SubnetIds: 
+          !Split 
+            - ","
+            - !ImportValue
+              'Fn::Sub': "${App}-${Env}-{{ addon_config.prefix }}-PrivateSubnetsName" 
+      Code:
+        ZipFile: |
+{{ addon_config.custom_resources.app_user(10) }}
+  {{ addon_config.prefix }}ApplicationUser:
+    Type: 'Custom::{{ addon_config.prefix }}ApplicationUser'
+    DeletionPolicy: !FindInMap [{{ addon_config.prefix }}EnvironmentConfigMap, !Ref Env, DeletionPolicy]
+    UpdateReplacePolicy: Retain
+    Properties:
+      ServiceToken: !GetAtt '{{ addon_config.prefix }}LambdaFunction.Arn'
+      CopilotApplication: !Sub "${App}"
+      CopilotEnvironment: !Sub "${Env}"
+      MasterUserSecret: 
+        Fn::ImportValue:
+          !Sub "${App}-${Env}-{{ addon_config.prefix }}-{{ addon_config.type|capitalize }}SecretName"
+      SecretDescription: !Sub {{ addon_type }} application user secret for ${AWS::StackName}
+      SecretName: !Sub '/copilot/${App}/${Env}/${Name}/secrets/{{ addon_config.name|upper|replace("-", "_") }}_APPLICATION_USER'
+      DefaultPublicRoute: 
+        Fn::ImportValue:
+          !Sub "${App}-${Env}-{{ addon_config.prefix }}-DefaultPublicRouteName"
+      InternetGateway: 
+        Fn::ImportValue:
+          !Sub "${App}-${Env}-{{ addon_config.prefix }}-InternetGatewayName"
+      InternetGatewayAttachment: 
+        Fn::ImportValue:
+          !Sub "${App}-${Env}-{{ addon_config.prefix }}-InternetGatewayAttachmentName"
+      PublicRouteTable: 
+        Fn::ImportValue:
+          !Sub "${App}-${Env}-{{ addon_config.prefix }}-PublicRouteTableName"
+      PublicSubnet1RouteTableAssociation:
+        Fn::ImportValue: 
+          !Sub "${App}-${Env}-{{ addon_config.prefix }}-PublicSubnet1RouteTableAssociationName"
+      PublicSubnet2RouteTableAssociation: 
+        Fn::ImportValue: 
+          !Sub "${App}-${Env}-{{ addon_config.prefix }}-PublicSubnet2RouteTableAssociationName"
+      Snapshot: !If [{{ addon_config.prefix }}UseSnapshot, !FindInMap [{{ addon_config.prefix }}EnvironmentConfigMap, !Ref Env, SnapshotIdentifier], ""]
+      Username: 'application_user'
+      Permissions:
+        - 'SELECT'
+        - 'INSERT'
+        - 'UPDATE'
+        - 'DELETE'
+        - 'TRIGGER'
+    # Resource based metadata block to ignore reference to resources in other addon templates. Do not remove.
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            # https://github.com/aws-cloudformation/cfn-lint/blob/main/docs/rules.md
+            - E3005
+
+  {{ addon_config.prefix }}ReadOnlyUser:
+    Type: 'Custom::{{ addon_config.prefix }}ReadOnlyUser'
+    DeletionPolicy: !FindInMap [{{ addon_config.prefix }}EnvironmentConfigMap, !Ref Env, DeletionPolicy]
+    UpdateReplacePolicy: Retain
+    Properties:
+      ServiceToken: !GetAtt '{{ addon_config.prefix }}LambdaFunction.Arn'
+      CopilotApplication: !Sub "${App}"
+      CopilotEnvironment: !Sub "${Env}"
+      MasterUserSecret: 
+        Fn::ImportValue:
+          !Sub "${App}-${Env}-{{ addon_config.prefix }}-{{ addon_config.type|capitalize }}SecretName"
+      SecretDescription: !Sub Aurora read only user secret for ${AWS::StackName}
+      SecretName: !Sub '/copilot/${App}/${Env}/${Name}/secrets/{{ addon_config.name|upper|replace("-", "_") }}_READ_ONLY_USER'
+      DefaultPublicRoute: 
+        Fn::ImportValue:
+          !Sub "${App}-${Env}-{{ addon_config.prefix }}-DefaultPublicRouteName"
+      InternetGateway: 
+        Fn::ImportValue:
+          !Sub "${App}-${Env}-{{ addon_config.prefix }}-InternetGatewayName"
+      InternetGatewayAttachment: 
+        Fn::ImportValue:
+          !Sub "${App}-${Env}-{{ addon_config.prefix }}-InternetGatewayAttachmentName"
+      PublicRouteTable: 
+        Fn::ImportValue:
+          !Sub "${App}-${Env}-{{ addon_config.prefix }}-PublicRouteTableName"
+      PublicSubnet1RouteTableAssociation:
+        Fn::ImportValue: 
+          !Sub "${App}-${Env}-{{ addon_config.prefix }}-PublicSubnet1RouteTableAssociationName"
+      PublicSubnet2RouteTableAssociation: 
+        Fn::ImportValue: 
+          !Sub "${App}-${Env}-{{ addon_config.prefix }}-PublicSubnet2RouteTableAssociationName"
+      Snapshot: !If [{{ addon_config.prefix }}UseSnapshot, !FindInMap [{{ addon_config.prefix }}EnvironmentConfigMap, !Ref Env, SnapshotIdentifier], ""]
+      Username: 'read_only_user'
+      Permissions:
+        - 'SELECT'
+    # Resource based metadata block to ignore reference to resources in other addon templates. Do not remove.
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            # https://github.com/aws-cloudformation/cfn-lint/blob/main/docs/rules.md
+            - E3005
+
+  {{ addon_config.prefix }}LambdaFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${App}-${Env}-{{ addon_config.prefix }}-user"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'sts:AssumeRole'
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      Policies:
+        - PolicyName: !Sub "${App}-${Env}-{{ addon_config.prefix }}-user"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ec2:CreateNetworkInterface'
+                  - 'ec2:DescribeNetworkInterfaces'
+                  - 'ec2:DeleteNetworkInterface'
+                Resource:
+                  - '*'
+              - Effect: Allow
+                Action:
+                  - 'ssm:DeleteParameter'
+                  - 'ssm:PutParameter'
+                  - 'ssm:AddTagsToResource'
+                  - 'kms:Decrypt'
+                Resource:
+                  - '*'
+              - Effect: Allow
+                Action:
+                  - 'secretsmanager:DescribeSecret'
+                  - 'secretsmanager:GetRandomPassword'
+                  - 'secretsmanager:GetSecretValue'
+                Resource:
+                  - '*'
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: 'arn:aws:logs:*:*:*'

@@ -127,7 +127,11 @@ class TestMakeAddonCommand:
             (
                 "rds_addons.yml",
                 ["my-rds-db.yml", "addons.parameters.yml", "monitoring.yml", "vpc.yml"],
-                ["appconfig-ipfilter.yml", "subscription-filter.yml"],
+                [
+                    "appconfig-ipfilter.yml",
+                    "subscription-filter.yml",
+                    "my-rds-db.yml",
+                ],
                 True,
             ),
             (
@@ -139,7 +143,11 @@ class TestMakeAddonCommand:
             (
                 "aurora_addons.yml",
                 ["my-aurora-db.yml", "addons.parameters.yml", "monitoring.yml", "vpc.yml"],
-                ["appconfig-ipfilter.yml", "subscription-filter.yml"],
+                [
+                    "appconfig-ipfilter.yml",
+                    "subscription-filter.yml",
+                    "my-aurora-db.yml",
+                ],
                 True,
             ),
             (

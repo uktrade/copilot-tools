@@ -252,8 +252,12 @@ def make_addons():
             "name": addon_config.get("name", None) or addon_name,
             "prefix": camel_case(addon_name),
             "environments": environments,
+            "custom_resources": custom_resources,
             **addon_config,
         }
+
+        if has_postgres_addon:
+            service_addon_config["type"] = addon_type.split("-")[0]
 
         log_destination_arns = get_log_destination_arn()
 
@@ -379,10 +383,10 @@ def _get_custom_resources():
         if isfile(file_path) and file_path.name.endswith(".py") and file_path.name != "__init__.py":
             custom_resource_contents = file_path.read_text()
 
-            def file_with_formatting_options(padding=0):
+            def file_with_formatting_options(padding=0, contents=custom_resource_contents):
                 lines = [
                     (" " * padding) + line if line.strip() else line.strip()
-                    for line in custom_resource_contents.splitlines(True)
+                    for line in contents.splitlines(True)
                 ]
                 return "".join(lines)
 

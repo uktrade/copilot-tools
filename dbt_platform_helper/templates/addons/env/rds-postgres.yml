@@ -292,304 +292,6 @@ Resources:
       TargetId: !Ref {{ addon_config.prefix }}DBInstance
       TargetType: AWS::RDS::DBInstance
 
-  {{ addon_config.prefix }}LambdaFunction:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: !Sub "${App}-${Env}-{{ addon_config.prefix }}-rds-create-user"
-      Handler: index.handler
-      Runtime: python3.11
-      Layers:
-        - arn:aws:lambda:eu-west-2:763451185160:layer:python-postgres:1
-      MemorySize: 128
-      Timeout: 10
-      Role: !GetAtt {{ addon_config.prefix }}LambdaFunctionExecutionRole.Arn
-      VpcConfig:
-        SecurityGroupIds:
-          - !Ref {{ addon_config.prefix }}SecurityGroup
-        SubnetIds: !Split [ ",", !Ref PrivateSubnets ]
-      Code:
-        ZipFile: |
-          import json
-          import boto3
-          import cfnresponse
-          import psycopg2
-          from botocore.exceptions import ClientError
-
-
-          def drop_user(cursor, username):
-              cursor.execute(f"SELECT * FROM pg_catalog.pg_user WHERE usename = '{username}'")
-
-              if cursor.fetchone() is not None:
-                  cursor.execute(f"GRANT {username} TO postgres")
-                  cursor.execute(f"DROP OWNED BY {username}")
-                  cursor.execute(f"DROP USER {username}")
-
-
-          def create_db_user(conn, cursor, username, password, permissions):
-              drop_user(cursor, username)
-
-              cursor.execute(f"CREATE USER {username} WITH ENCRYPTED PASSWORD '%s'" % password)
-              cursor.execute(f"GRANT {username} to postgres;")
-              cursor.execute(f"GRANT {', '.join(permissions)} ON ALL TABLES IN SCHEMA public TO {username};")
-              cursor.execute(f"ALTER DEFAULT PRIVILEGES FOR USER {username} IN SCHEMA public GRANT {', '.join(permissions)} ON TABLES TO {username};")
-              conn.commit()
-
-
-          def create_or_update_user_secret(ssm, user_secret_name, user_secret_string, event):
-              user_secret_description = event['ResourceProperties']['SecretDescription']
-              copilot_application = event['ResourceProperties']['CopilotApplication']
-              copilot_environment = event['ResourceProperties']['CopilotEnvironment']
-
-              user_secret = None
-
-              try:
-                  user_secret = ssm.put_parameter(
-                      Name=user_secret_name,
-                      Description=user_secret_description,
-                      Value=json.dumps(user_secret_string),
-                      Tags=[
-                          {'Key': 'custom:cloudformation:stack-name', 'Value': event["StackId"].split('/')[1]},
-                          {'Key': 'custom:cloudformation:logical-id', 'Value': event["LogicalResourceId"]},
-                          {'Key': 'custom:cloudformation:stack-id', 'Value': event["StackId"]},
-                          {'Key': 'copilot-application', 'Value': copilot_application},
-                          {'Key': 'copilot-environment', 'Value': copilot_environment},
-                      ],
-                      Type="String",
-                  )
-              except ClientError as error:
-                  if error.response["Error"]["Code"] == "ParameterAlreadyExists":
-                      user_secret = ssm.put_parameter(
-                          Name=user_secret_name,
-                          Description=user_secret_description,
-                          Value=json.dumps(user_secret_string),
-                          Overwrite=True,
-                      )
-
-              return user_secret
-
-
-          def handler(event, context):
-              print("REQUEST RECEIVED:\n" + json.dumps(event))
-
-              db_master_user_secret = event['ResourceProperties']['MasterUserSecret']
-              user_secret_name = event['ResourceProperties']['SecretName']
-              username = event['ResourceProperties']['Username']
-              user_permissions = event['ResourceProperties']['Permissions']
-
-              secrets_manager = boto3.client("secretsmanager")
-              ssm = boto3.client("ssm")
-
-              master_user = json.loads(secrets_manager.get_secret_value(SecretId=db_master_user_secret)["SecretString"])
-
-              user_password = secrets_manager.get_random_password(
-                  PasswordLength=16,
-                  ExcludeCharacters='[]{}()"@/\;=?&`><:|#',
-                  ExcludePunctuation=True,
-                  IncludeSpace=False,
-              )["RandomPassword"]
-
-              user_secret_string = {
-                  "username": username,
-                  "password": user_password,
-                  "engine": master_user["engine"],
-                  "port": master_user["port"],
-                  "dbname": master_user["dbname"],
-                  "host": master_user["host"],
-                  "dbInstanceIdentifier": master_user["dbInstanceIdentifier"]
-              }
-
-              conn = psycopg2.connect(
-                  dbname=master_user["dbname"],
-                  user=master_user["username"],
-                  password=master_user["password"],
-                  host=master_user["host"],
-                  port=master_user["port"]
-              )
-
-              cursor = conn.cursor()
-
-              response = {"Status": "SUCCESS"}
-
-              try:
-                  match event["RequestType"]:
-                      case "Create":
-                          create_db_user(conn, cursor, username, user_password, user_permissions)
-
-                          response = {
-                              **response,
-                              "Data": create_or_update_user_secret(ssm, user_secret_name, user_secret_string, event)
-                          }
-                      case "Update":
-                          create_db_user(conn, cursor, username, user_password, user_permissions)
-
-                          response = {
-                              **response,
-                              "Data": create_or_update_user_secret(ssm, user_secret_name, user_secret_string, event)
-                          }
-                      case "Delete":
-                          drop_user(cursor, username)
-
-                          response = {
-                              **response,
-                              "Data": ssm.delete_parameter(Name=user_secret_name)
-                          }
-                      case _:
-                          response = {"Status": "FAILED",
-                                      "Data": {"Error": f"""Invalid requestType of '${event["RequestType"]}'"""}}
-              except Exception as e:
-                  response = {"Status": "FAILED", "Data": {"Error": str(e)}}
-
-              cursor.close()
-              conn.close()
-
-              print(json.dumps(response, default=str))
-              cfnresponse.send(event, context, response["Status"], response["Data"], event["LogicalResourceId"])
-
-  {{ addon_config.prefix }}ApplicationUser:
-    Type: 'Custom::{{ addon_config.prefix }}ApplicationUser'
-    DeletionPolicy: !FindInMap [{{ addon_config.prefix }}EnvironmentConfigMap, !Ref Env, DeletionPolicy]
-    UpdateReplacePolicy: Retain
-    Properties:
-      ServiceToken: !GetAtt '{{ addon_config.prefix }}LambdaFunction.Arn'
-      CopilotApplication: !Sub "${App}"
-      CopilotEnvironment: !Sub "${Env}"
-      MasterUserSecret: !Ref {{ addon_config.prefix }}RDSSecret
-      SecretDescription: !Sub RDS application user secret for ${AWS::StackName}
-      SecretName: !Sub '/copilot/${App}/${Env}/secrets/{{ addon_config.name|upper|replace("-", "_") }}_APPLICATION_USER'
-      DefaultPublicRoute: !Ref DefaultPublicRoute
-      InternetGateway: !Ref InternetGateway
-      InternetGatewayAttachment: !Ref InternetGatewayAttachment
-      PublicRouteTable: !Ref PublicRouteTable
-      PublicSubnet1RouteTableAssociation: !Ref PublicSubnet1RouteTableAssociation
-      PublicSubnet2RouteTableAssociation: !Ref PublicSubnet2RouteTableAssociation
-      Username: 'application_user'
-      Permissions:
-        - 'SELECT'
-        - 'INSERT'
-        - 'UPDATE'
-        - 'DELETE'
-        - 'TRIGGER'
-    # Resource based metadata block to ignore reference to resources in other addon templates. Do not remove.
-    Metadata:
-      cfn-lint:
-        config:
-          ignore_checks:
-            # https://github.com/aws-cloudformation/cfn-lint/blob/main/docs/rules.md
-            - E3005
-    DependsOn:
-      - VpcEndpoint
-      - {{ addon_config.prefix }}DBInstance
-      - AdditionalNatGateway1
-      - AdditionalNatGateway2
-      - AdditionalPrivateRoute1
-      - AdditionalPrivateRouteTable1
-      - AdditionalPrivateRouteTable1Association
-      - AdditionalPrivateRoute2
-      - AdditionalPrivateRouteTable2
-      - AdditionalPrivateRouteTable2Association
-      - {{ addon_config.prefix }}SecretRDSAttachment
-      - {{ addon_config.prefix }}DBIngress
-      - {{ addon_config.prefix }}SecretsManagerIngress
-      - {{ addon_config.prefix }}LambdaIngress
-      - {{ addon_config.prefix }}SecretsManagerEgress
-      - {{ addon_config.prefix }}LambdaEgress
-      - {{ addon_config.prefix }}HTTPSEgress
-      - {{ addon_config.prefix }}KeyAlias
-
-  {{ addon_config.prefix }}ReadOnlyUser:
-    Type: 'Custom::{{ addon_config.prefix }}ReadOnlyUser'
-    DeletionPolicy: !FindInMap [{{ addon_config.prefix }}EnvironmentConfigMap, !Ref Env, DeletionPolicy]
-    UpdateReplacePolicy: Retain
-    Properties:
-      ServiceToken: !GetAtt '{{ addon_config.prefix }}LambdaFunction.Arn'
-      CopilotApplication: !Sub "${App}"
-      CopilotEnvironment: !Sub "${Env}"
-      MasterUserSecret: !Ref {{ addon_config.prefix }}RDSSecret
-      SecretDescription: !Sub RDS application user secret for ${AWS::StackName}
-      SecretName: !Sub '/copilot/${App}/${Env}/secrets/{{ addon_config.name|upper|replace("-", "_") }}_READ_ONLY_USER'
-      DefaultPublicRoute: !Ref DefaultPublicRoute
-      InternetGateway: !Ref InternetGateway
-      InternetGatewayAttachment: !Ref InternetGatewayAttachment
-      PublicRouteTable: !Ref PublicRouteTable
-      PublicSubnet1RouteTableAssociation: !Ref PublicSubnet1RouteTableAssociation
-      PublicSubnet2RouteTableAssociation: !Ref PublicSubnet2RouteTableAssociation
-      Username: 'read_only_user'
-      Permissions:
-        - 'SELECT'
-    # Resource based metadata block to ignore reference to resources in other addon templates. Do not remove.
-    Metadata:
-      cfn-lint:
-        config:
-          ignore_checks:
-            # https://github.com/aws-cloudformation/cfn-lint/blob/main/docs/rules.md
-            - E3005
-    DependsOn:
-      - VpcEndpoint
-      - {{ addon_config.prefix }}DBInstance
-      - AdditionalNatGateway1
-      - AdditionalNatGateway2
-      - AdditionalPrivateRoute1
-      - AdditionalPrivateRouteTable1
-      - AdditionalPrivateRouteTable1Association
-      - AdditionalPrivateRoute2
-      - AdditionalPrivateRouteTable2
-      - AdditionalPrivateRouteTable2Association
-      - {{ addon_config.prefix }}SecretRDSAttachment
-      - {{ addon_config.prefix }}DBIngress
-      - {{ addon_config.prefix }}SecretsManagerIngress
-      - {{ addon_config.prefix }}LambdaIngress
-      - {{ addon_config.prefix }}SecretsManagerEgress
-      - {{ addon_config.prefix }}LambdaEgress
-      - {{ addon_config.prefix }}HTTPSEgress
-      - {{ addon_config.prefix }}KeyAlias
-
-  {{ addon_config.prefix }}LambdaFunctionExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub "${App}-${Env}-{{ addon_config.prefix }}-rds-user"
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action:
-              - 'sts:AssumeRole'
-            Principal:
-              Service:
-                - lambda.amazonaws.com
-      Policies:
-        - PolicyName: !Sub "${App}-${Env}-rds-user"
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 'ec2:CreateNetworkInterface'
-                  - 'ec2:DescribeNetworkInterfaces'
-                  - 'ec2:DeleteNetworkInterface'
-                Resource:
-                  - '*'
-              - Effect: Allow
-                Action:
-                  - 'ssm:DeleteParameter'
-                  - 'ssm:PutParameter'
-                  - 'ssm:AddTagsToResource'
-                  - 'kms:Decrypt'
-                Resource:
-                  - '*'
-              - Effect: Allow
-                Action:
-                  - 'secretsmanager:DescribeSecret'
-                  - 'secretsmanager:GetRandomPassword'
-                  - 'secretsmanager:GetSecretValue'
-                Resource:
-                  - '*'
-              - Effect: Allow
-                Action:
-                  - 'logs:CreateLogGroup'
-                  - 'logs:CreateLogStream'
-                  - 'logs:PutLogEvents'
-                Resource: 'arn:aws:logs:*:*:*'
-
   {{ addon_config.prefix }}SubscriptionFilter:
     Type: AWS::Logs::SubscriptionFilter
     DependsOn:
@@ -600,3 +302,58 @@ Resources:
       FilterName: !Sub '/aws/rds/instance/${App}/${Env}/${{ '{' }}{{ addon_config.prefix }}DBInstance}/postgresql'
       FilterPattern: ''
       DestinationArn: !If [{{ addon_config.prefix }}CreateProdSubFilter, '{{ log_destination.prod }}', '{{ log_destination.dev }}']
+
+Outputs:
+  {{ addon_config.prefix }}DBClusterSecurityGroupName:
+    Description: The name of the db cluster security group
+    Value: !Ref {{ addon_config.prefix }}SecurityGroup
+    Export:
+      Name: !Sub "${App}-${Env}-{{ addon_config.prefix }}-DBClusterSecurityGroupName"
+
+  {{ addon_config.prefix }}PublicSubnet1RouteTableAssociationName:
+    Description: The name of the first public subnet route table association
+    Value: !Ref PublicSubnet1RouteTableAssociation
+    Export:
+      Name: !Sub "${App}-${Env}-{{ addon_config.prefix }}-PublicSubnet1RouteTableAssociationName"
+
+  {{ addon_config.prefix }}PublicSubnet2RouteTableAssociationName:
+    Description: The name of the second public subnet route table association
+    Value: !Ref PublicSubnet2RouteTableAssociation
+    Export:
+      Name: !Sub "${App}-${Env}-{{ addon_config.prefix }}-PublicSubnet2RouteTableAssociationName"
+    
+  {{ addon_config.prefix }}RdsSecretName:
+    Description: Name of RDS db secret
+    Value: !Ref {{ addon_config.prefix }}RDSSecret
+    Export:
+      Name: !Sub "${App}-${Env}-{{ addon_config.prefix }}-RdsSecretName"
+
+  {{ addon_config.prefix }}InternetGatewayName:
+    Description: Name of internet gateway
+    Value: !Ref InternetGateway
+    Export:
+      Name: !Sub "${App}-${Env}-{{ addon_config.prefix }}-InternetGatewayName"
+  
+  {{ addon_config.prefix }}PublicRouteTableName:
+    Description: Name of public route table
+    Value: !Ref PublicRouteTable
+    Export:
+      Name: !Sub "${App}-${Env}-{{ addon_config.prefix }}-PublicRouteTableName"
+  
+  {{ addon_config.prefix }}DefaultPublicRouteName:
+    Description: Name of default public route
+    Value: !Ref DefaultPublicRoute
+    Export:
+      Name: !Sub "${App}-${Env}-{{ addon_config.prefix }}-DefaultPublicRouteName"
+    
+  {{ addon_config.prefix }}InternetGatewayAttachmentName:
+    Description: Name of internet gateway attachment
+    Value: !Ref InternetGatewayAttachment
+    Export:
+      Name: !Sub "${App}-${Env}-{{ addon_config.prefix }}-InternetGatewayAttachmentName"
+
+  {{ addon_config.prefix }}PrivateSubnetsName:
+    Description: Name of private subnets
+    Value: !Ref PrivateSubnets
+    Export:
+      Name: !Sub "${App}-${Env}-{{ addon_config.prefix }}-PrivateSubnetsName"

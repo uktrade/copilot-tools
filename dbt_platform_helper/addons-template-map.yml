@@ -17,10 +17,14 @@ redis:
 aurora-postgres:
   env:
     - template: addons/env/aurora-postgres.yml
+  svc:
+    - template: addons/svc/postgres-lambda.yml
 rds-postgres:
   requires_addons_parameters: true
   env:
     - template: addons/env/rds-postgres.yml
+  svc:
+    - template: addons/svc/postgres-lambda.yml
 opensearch:
   requires_addons_parameters: true
   env:
