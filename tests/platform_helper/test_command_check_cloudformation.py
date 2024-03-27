@@ -127,3 +127,22 @@ def test_security_check_failed(app_with_insecure_cf_template, copilot_directory:
         in result.output
     )
     assert "Ensure RDS database has IAM authentication enabled" in result.output
+
+
+@pytest.mark.xdist_group(name="fileaccess")
+def test_linting_check_multiple_rules_ignored(app_with_valid_cf_template, copilot_directory: Path):
+    result = CliRunner().invoke(
+        check_cloudformation_command,
+        args=[
+            "lint",
+            "--directory",
+            copilot_directory,
+            "--ignore-checks",
+            "A123",
+            "--ignore-checks",
+            "B234",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "--ignore-checks A123 --ignore-checks B234 --ignore-checks W2001" in result.output

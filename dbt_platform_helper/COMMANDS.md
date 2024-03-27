@@ -205,13 +205,16 @@ platform-helper check-cloudformation (lint|check-security)
 ## Usage
 
 ```
-platform-helper check-cloudformation lint [-d <directory>] 
+platform-helper check-cloudformation lint [-d <directory>] [-i <ignore_checks>] 
 ```
 
 ## Options
 
 - `-d
 --directory <text>` _Defaults to copilot._
+
+- `-i
+--ignore-checks <text>` _Defaults to []._
 
 - `--help <boolean>` _Defaults to False._
   - Show this message and exit.

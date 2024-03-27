@@ -29,17 +29,19 @@ def check_cloudformation(ctx: click.Context, directory: str) -> None:
 
 @check_cloudformation.command()
 @click.option("-d", "--directory", type=str, default="copilot")
+@click.option("-i", "--ignore-checks", type=str, multiple=True, default=[])
 @click.pass_context
-def lint(ctx: click.Context, directory: str) -> bool:
+def lint(ctx: click.Context, directory: str, ignore_checks: list) -> bool:
     """Runs cfn-lint against the generated CloudFormation templates."""
     addons_manifests = f"{directory}/**/addons/*.yml"
     # addons.parameters.yml is not a CloudFormation template file
     ignore_addons_params = f"{directory}/**/addons/addons.parameters.yml"
     # "W2001 Parameter Env not used" is ignored becomes Copilot addons require
     # parameters even if they are not used in the Cloudformation template.
-    ignore_checks = "W2001"
+    ignore_checks_list = list(ignore_checks)
+    ignore_checks_list.append("W2001")
 
-    result = get_lint_result(addons_manifests, ignore_addons_params, ignore_checks)
+    result = get_lint_result(addons_manifests, ignore_addons_params, ignore_checks_list)
     success = result.returncode == 0
 
     ctx.obj["lint"] = {
